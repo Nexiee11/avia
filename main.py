@@ -11,93 +11,114 @@ import geopy.distance
 import schedule
 import time
 import threading
+from telegram_bot_pagination import InlineKeyboardPaginator
+import formatting
+import json
+import random
+
+selected = None
+selected_date = None
 #объявление экземпляров классов
 fr_api = FlightRadar24API()
 TOKEN = constants.TOKEN
 bot = telebot.TeleBot(TOKEN)
 db = DB('/Users/fedorfatekhov/Desktop/telegram_bot/telegram_bot_db.db')
+with open('cities.json','r') as f: 
+    cities = json.load(f)
+    f.close()
 
-#обработчик команды старт + отправка сообщения
+
 @bot.message_handler(commands = ['start'])
-def start(message): 
+def start(message):
+    """Send welcome message to user""" 
     s = 'I am a Flight Track Bot and I will help all aviation enthusiasts around the world\n'
     bot.send_message(message.chat.id,f'Hi,<b>{message.from_user.first_name}</b>\n\n{s}',parse_mode='HTML')
     
-#создаем инлайн кнопки для бота + обработчик команды help
+bot.set_my_commands([
+    telebot.types.BotCommand("/start", "Start bot"),
+    telebot.types.BotCommand("/flight", "Find flight by registration number"),
+    telebot.types.BotCommand("/ticket", "Find cheapest ticket from your home airport"),
+    telebot.types.BotCommand("/registration", "Set your home airport"),
+    telebot.types.BotCommand("/change", "Change your home airport"),
+    telebot.types.BotCommand("/gif", "Get an aviation gif"),
+    telebot.types.BotCommand("/stats", "Get your last searched flights")
+])
+
 @bot.message_handler(commands=['help'])
 def help_handler(message):
-    markup = telebot.types.ReplyKeyboardMarkup(row_width=2,resize_keyboard=True)
-    markup.add('Get flight info') #добавляем кнопку в маркап
-    markup.add('Get planes near you')
-    markup.add('See my stats')
-    markup.add('Get an Airplane GIF')
-    bot.send_message(message.from_user.id, constants.HELP, reply_markup=markup)
+    bot.send_message(message.from_user.id, constants.HELP)
     
 #обработчки для команды регистарции    
-@bot.message_handler(commands=['register'])
+@bot.message_handler(commands=['registration'])
 def reg_person(message):
+    """Check user in DB if user is new add him to DB"""
     if not db.check_user_in_db(message.chat.id):
         bot.send_message(message.chat.id,'Enter your home AIRPORT') 
         bot.register_next_step_handler(message,get_airport)
     else: 
-        bot.send_message(message.chat.id,'You are already registered! Enjoy our bot.\n For help type: /help')
+        bot.send_message(message.chat.id,'You are already registered! Enjoy our bot.\nFor help type: /help')
         
-#функция которая получает нужный аэропорт(попадаем в нее с помощью next step handler)    
+  
 def get_airport(message):
+    """Get home airport from user and add it to DB"""
     airport = f'<b>{message.text}</b>'
-    bot.send_message(message.chat.id,f'Thank you for registering. Your home airport is {airport}',parse_mode='HTML')
+    bot.send_message(message.chat.id,f'Thank you for registering. Your home airport is now {airport}',parse_mode='HTML')
     db.add_user(message.from_user.id,message.text) # записываем введенный аэропорт в БД, с помомщью запроса
     
-#функция хэндлер для команды сменить аэропорт
-@bot.message_handler(commands=['change_airport'])
+
+@bot.message_handler(commands=['change'])
 def change_airport(message):
     bot.send_message(message.chat.id,'Enter your new home airport')
     print(db.get_user_id(message.from_user.id))
     bot.register_next_step_handler(message,get_new_airport)
+
+@bot.message_handler(commands = ['gif'])
+def gif_sender(message): 
+    """Get url of a gif and send it to user"""
+    url = get_gif_url()
+    bot.send_document(message.chat.id,url)
     
-#функция аналогичная предыдущей, но для обновления 
 def get_new_airport(message): 
     new_port = message.text 
     db.change_airport(message.from_user.id,new_port) # обновляем таблицу в БД с помощью INSERT
     bot.send_message(message.chat.id,f'All set! Your new home airport is {new_port}')
      
-    
-#полчуаем фото самолета по локации
-def get_url_by_location(message):
-    #через запрос к API FlightRadar24 границы поиска + указываем полученные из отправленной лоакции широту и долготу
+def get_bounds(message):
+    """Find flight by geo bounds"""
     bounds = fr_api.get_bounds_by_point(message.location.latitude, message.location.longitude, 250000)
     flight = fr_api.get_flights(bounds = bounds)[0]
+    return flight
+
+def get_url(message,by):
+    if by == 'location':
+        flight = get_bounds(message)
+    else: 
+        flight = fr_api.get_flights(registration=message.text)[0]
+        
     flight_details = fr_api.get_flight_details(flight)
     flight.set_flight_details(flight_details)
-    print(message.location.latitude, message.location.longitude)
-    try:
-        url = flight.aircraft_images['medium'][0]['src']
-        return url
-    except:
-        return 'https://unsplash.com/photos/a-large-airplane-flying-through-a-blue-sky-72Q4qUGGAbU'
+    url = flight.aircraft_images['medium'][0]['src']
+    return url
 
-def get_info_by_location(message):
-    bounds = fr_api.get_bounds_by_point(message.location.latitude, message.location.longitude, 250000)
-    flight = fr_api.get_flights(bounds = bounds)[0]
+
+def get_info(message,by):
+    if by == 'location':
+        flight = get_bounds(message)
+    else: 
+        flight = fr_api.get_flights(registration=message.text)[0]
+        
     flight_details = fr_api.get_flight_details(flight)
     flight.set_flight_details(flight_details)
     info = [flight.registration,flight.aircraft_model,flight.airline_name,flight.origin_airport_name,flight.destination_airport_name,flight.ground_speed,flight.altitude,flight.heading,flight.time_details,flight.destination_airport_iata,flight.origin_airport_iata]
     return info
+        
 
-def get_url_by_registration(message):
-    flight = fr_api.get_flights(registration=message.text)[0]
-    flight_details = fr_api.get_flight_details(flight)
-    flight.set_flight_details(flight_details)
-    url = flight.aircraft_images['medium'][0]['src']
-    
-    return url
+
 def ticket_price_handler(message):
-    print(type(message.text))
     home_airport = db.get_home_airport(message.from_user.id)
     url = constants.API_URL
     dest_and_time = message.text.split(' ')
-    print(message.text)
-    querystring = {"origin":f'{home_airport}',"page":"None","currency":"USD","depart_date":f'{dest_and_time[1]}',"destination":f'{dest_and_time[0]}'}
+    querystring = {"origin":f'{home_airport}',"page":"None","currency":"USD","depart_date":f'{selected_date}',"destination":f'{selected}'}
 
     headers = {
         "X-Access-Token": f'{constants.X_Access_Token}',
@@ -108,7 +129,6 @@ def ticket_price_handler(message):
     response = requests.get(url, headers=headers, params=querystring).json()
     
     airlines = fr_api.get_airlines()
-    print(response['data'])
     key = list(response['data'].keys())[0]
     ticket_info = response['data'][key]
     ticket_info_keys = list(ticket_info.keys())
@@ -122,32 +142,48 @@ def ticket_price_handler(message):
     price = str(response['data'][key][ticket_info_keys[0]]['price']) + ' $'
     
     s = '<b>Info about your flight</b>\n'
-    s += f'Destination: {home_airport} -> {dest_and_time[0]}\n'
+    s += f'Destination: {home_airport} -> {selected}\n'
     s += f'Airline: {airline}\n'
     s += f'Departure date: {departure}\n'
     s += f'Price: {price}\n'
     
-    db.add_flight(message.from_user.id,home_airport,dest_and_time[0],int(price.split(' ')[0]),departure)
+    db.add_flight(message.from_user.id,home_airport,selected,int(price.split(' ')[0]),departure,airline,datetime.now())
     bot.send_message(message.chat.id,s,parse_mode='HTML')
-    
-@bot.message_handler(commands=['get_my_flight'])
-def get_ticket_price(message):
-    bot.send_message(message.chat.id,'<b>Enter your destination and departure date</b>\nExample:\nVKO 2024-03-15\nVKO 2024-03',parse_mode='HTML')
-    bot.register_next_step_handler(message,ticket_price_handler)
-    
-def format_searches(row):
-    ...
-def get_10_flights(user_id):
-    home_airport = db.get_home_airport(user_id)
-    url = "https://travelpayouts-travelpayouts-flight-data-v1.p.rapidapi.com/v1/city-directions"
-    querystring = {"currency":"USD","origin":f'{home_airport}'}
-    headers = {
-        "X-Access-Token": f'{constants.X_Access_Token}',
-        "X-RapidAPI-Key": f'{constants.X_RapidAPI_Key}',
-        "X-RapidAPI-Host": f'{constants.X_RapidAPI_Host}'
-    }
 
-    response = list((requests.get(url, headers=headers, params=querystring).json()['data'].values()))
+def show_airports(message):
+    values = [x for x,y in cities.items() if y == message.text]
+    keyboard = types.InlineKeyboardMarkup()
+    for value in values:
+        button = types.InlineKeyboardButton(text=value, callback_data=value)
+        keyboard.add(button)
+    bot.send_message(message.chat.id,'Choose from this options',reply_markup=keyboard)
+
+def get_date(message):
+    global selected_date
+    text = message.text.split()
+    selected_date = f'2024-{"-".join(x for x in text)}'
+    ticket_price_handler(message)
+    
+def choose_date(message): 
+    bot.send_message(message.chat.id,f'Selected option: {selected}\nNow choose a date\nFormat: MM DD')
+    bot.register_next_step_handler(message,get_date)
+    
+@bot.message_handler(commands=['ticket'])
+def get_ticket_price(message):
+    bot.send_message(message.chat.id,'<b>Enter your city destination</b>',parse_mode='HTML')
+    bot.register_next_step_handler(message,show_airports)
+    
+@bot.callback_query_handler(func=lambda call: True)
+def button_click(call):
+    global selected 
+    selected = call.data
+    choose_date(call.message)
+
+
+    
+
+def get_10_flights(user_id):
+    response = formatting.get_10_flights(user_id)
     airlines = fr_api.get_airlines()
     top_10 = sorted(response,key=lambda x: (x['price'],x['departure_at']))[:10]
     s = '<b> Top 10 flights from your home airport for today</b>\n'
@@ -159,44 +195,40 @@ def get_10_flights(user_id):
         s += (f"{i}. {x['origin']} -> {x['destination']} with {airline} at {departure} for {x['price']} $\n\n")
     return s
 
-# @bot.message_handler(commands=['send'])
-# def admin_send_flights(message):
-#     admin = db.check_admin()
-#     print(message.chat.id)
-#     if str(message.chat.id) == str(admin):
-#         bot.send_message(message.chat.id,'Starting...') 
-#         all_id = db.get_all_users()
-#         print(all_id)
-#         for i in all_id:
-#             bot.send_message(int(i[0]),get_10_flights(i[0]),parse_mode='HTML')
-#     else:
-#         bot.send_message(message.chat.id,'Access denied') 
-
 def admin_send_flights123():
     ids = db.get_all_users()[1][0]
     bot.send_message(ids,get_10_flights(ids),parse_mode='HTML')
-    
-    
 
-@bot.message_handler(content_types=['text'])
+    
+@bot.message_handler(commands=['flight'])
+def info_by_registration(message): 
+    bot.send_message(message.chat.id,'Please send me registration')
+    bot.register_next_step_handler(message,get_flight)
+
+@bot.message_handler(commands=['stats'])
 def get_users_flights(message):
-    if message.text == 'See my stats':
-        home_airport = db.get_home_airport(message.from_user.id)
-        s = f'<b>Your most recent flight searches</b>\n\n<u>Your home airport is currently</u>: {home_airport}\n\n'
-        
-        stats = db.show_user_flights(message.from_user.id)
-        print(stats[0])
-        for i,x in enumerate(stats,start=1):
-            s += f'{i}. From {x[0]} to {x[1]} for: {x[2]}$ at {x[3]}\n\n'
-        bot.send_message(message.chat.id,s,parse_mode='HTML')
+    home_airport = db.get_home_airport(message.from_user.id)
+    s = f'<b>Your most recent flight searches</b>\n\n<u>Your home airport is currently</u>: {home_airport}\n\n'
     
-def get_info_by_registration(message):
-    flight = fr_api.get_flights(registration=message.text)[0]
-    flight_details = fr_api.get_flight_details(flight)
-    flight.set_flight_details(flight_details)
-    info = [flight.registration,flight.aircraft_model,flight.airline_name,flight.origin_airport_name,flight.destination_airport_name,flight.ground_speed,flight.altitude,flight.heading,flight.time_details,flight.destination_airport_iata,flight.origin_airport_iata]
-    return info
+    stats = db.show_user_flights(message.from_user.id)
+    print(stats[0])
+    for i,x in enumerate(stats,start=1):
+        s += f'{i}. From {x[0]} to {x[1]} for: {x[2]}$ at {x[3]} with {x[4]}\n\n'
+    bot.send_message(message.chat.id,s,parse_mode='HTML')
 
+def get_gif_url():
+    url = 'https://api.giphy.com/v1/gifs/search'
+
+    param = {
+            "api_key": constants.GIPHY_API,
+            "q": "airplane",
+            "limit":5,
+            "rating":"g"
+        }
+
+    result = requests.get(url, params=param).json()
+    result = [result['data'][i]['images']['original']['url'] for i in range(5)]
+    return random.choice(result)
 
 def format_time(timestamp): 
     datetime_obj = datetime.utcfromtimestamp(timestamp)
@@ -204,15 +236,9 @@ def format_time(timestamp):
     formatted_time = (datetime_obj +timedelta(hours=3)).strftime('%H:%M:%S')
     return formatted_time
 
-def get_distance(coord1,coord2):
-    return geopy.distance.geodesic(coord1, coord2).km
-
 def format_info(message,by): 
-    if by == 'location':
-        info = get_info_by_location(message)
-    else:
-        info = get_info_by_registration(message)
-
+    info = get_info(message,by)
+    flight = fr_api.get_flights(registration=info[0])[0]
     s = "<b>Info</b>\n\n"
     s += "<b>Basic info</b>\n"
     try: 
@@ -262,41 +288,55 @@ def format_info(message,by):
     except: 
         s += 'N/A'
     try:
-        ap_from = (fr_api.get_airport(info[9]).latitude,fr_api.get_airport(info[9]).longitude)
-        ap_to = (fr_api.get_airport(info[10]).latitude,fr_api.get_airport(info[10]).longitude)
-        s += f'Distance is {get_distance(ap_from,ap_to):.0f} km'
+        s += f'Distance left: {flight.get_distance_from(fr_api.get_airport(info[-2])):.0f} km\n\n'
     except:
         s += 'N/A'
+    try: 
+        s+= f'Arrival airport website is: {fr_api.get_airport(info[-2],details=True).website}'
+    except:
+        s+= 'N/A'
+    
     return s
         
 
 @bot.message_handler(content_types=['location'])
 def handle_location_message(message):
-    url = get_url_by_location(message)
-    sent_photo = bot.send_photo(message.chat.id,url)
-    sent_photo_id = sent_photo.message_id
-    bot.send_message(message.chat.id, format_info(message,'location'), reply_to_message_id=sent_photo_id,parse_mode='HTML')
-
+    try:
+        url = get_url(message,'location')
+        sent_photo = bot.send_photo(message.chat.id,url)
+        sent_photo_id = sent_photo.message_id
+        bot.send_message(message.chat.id, format_info(message,'location'), reply_to_message_id=sent_photo_id,parse_mode='HTML')
+    except: 
+        bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+        bot.send_message(message.chat.id,'It seems that now there is no flights above you\nPlease,check later!')
+        
     bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+    
+    
 def get_flight(message):
-    url = get_url_by_registration(message)
+    url = get_url(message,'registration')
     sent_photo = bot.send_photo(message.chat.id,url)
     sent_photo_id = sent_photo.message_id
     bot.send_message(message.chat.id, format_info(message,'registration'), reply_to_message_id=sent_photo_id,parse_mode='HTML')
     
-@bot.message_handler(content_types=['text'])
-def info_by_registration(messsage): 
-    if messsage.text == 'Get flight info':
-        bot.register_next_step_handler(messsage,get_flight)
-        
+@bot.message_handler(commands=['flight'])
+def info_by_registration(message): 
+    bot.send_message(message.chat.id,'Please send me registration')
+    bot.register_next_step_handler(message,get_flight)
 
-schedule.every(10).seconds.do(admin_send_flights123)
+@bot.message_handler(commands=['weather'])
+def info_by_registration(message): 
+    airport = db.get_home_airport(message.chat.id)
+    weather = fr_api.get_airport(airport,details=True).weather['temp']['celsius']
+    bot.send_message(message.chat.id,f'Temp at your home airport is: {weather} °C')
+# schedule.every(10).seconds.do(admin_send_flights123)
 
-def biba():
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
+# def biba():
+#     while True:
+#         schedule.run_pending()
+#         time.sleep(1)
 
-scheduler_thread = threading.Thread(target=biba)
-scheduler_thread.start()
+# scheduler_thread = threading.Thread(target=biba)
+# scheduler_thread.start()
 bot.polling()
+

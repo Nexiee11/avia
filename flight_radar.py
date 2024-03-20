@@ -1,10 +1,11 @@
-# from FlightRadar24 import FlightRadar24API
-# fr_api = FlightRadar24API()
-# import json
-# from datetime import datetime,timedelta
-# import geopy.distance
-# import constants
-# from database import DB
+from FlightRadar24 import FlightRadar24API
+fr_api = FlightRadar24API()
+import json
+from datetime import datetime,timedelta
+import geopy.distance
+import constants
+from database import DB
+import requests
 
 # coords_1 = (52.2296756, 21.0122287)
 # coords_2 = (52.406374, 16.9251681)
@@ -12,14 +13,14 @@
 # a2 = fr_api.get_airport('SVO')
 
 
-# # # print(a1.latitude,a1.longitude)
-# print(f'{geopy.distance.geodesic((a1.latitude,a1.longitude), (a2.latitude,a2.longitude)).km:.0f}')
-# # bounds = fr_api.get_bounds_by_point(55.702898257823115, 37.35183186771398,  1000000)
-# # flight = fr_api.get_flights(bounds = bounds)[0]
-# # flight_details = fr_api.get_flight_details(flight)
-# # flight.set_flight_details(flight_details)
-# # # print(flight.registration,flight.aircraft_model,flight.airline_name,flight.origin_airport_name,flight.destination_airport_name)
-# # print(fr_api.get_airport(flight.origin_airport_iata).latitude)
+# # print(a1.latitude,a1.longitude)
+# # print(f'{geopy.distance.geodesic((a1.latitude,a1.longitude), (a2.latitude,a2.longitude)).km:.0f}')
+# bounds = fr_api.get_bounds_by_point(55.702898257823115, 37.35183186771398,  1000000)
+# flight = fr_api.get_flights(bounds = bounds)[0]
+# flight_details = fr_api.get_flight_details(flight)
+# flight.set_flight_details(flight_details)
+# print(flight.registration,flight.aircraft_model,flight.airline_name,flight.origin_airport_name,flight.destination_airport_name)
+# print(fr_api.get_airport(flight.origin_airport_iata).latitude)
 
 
 # # most = [fr_api.get_most_tracked()['data'][i]['to_iata'] for i in range(6)]
@@ -120,10 +121,39 @@
 # #     print(get_10_flights(x[0]))
 
 
+# a = 'Moscow'
+
+# s = fr_api.get_airports()
+# fr_api.get_airport_details
+
+# def get_gif_url():
+#     url = 'https://api.giphy.com/v1/gifs/search'
+
+#     param = {
+#             "api_key": constants.GIPHY_API,
+#             "q": "airplane",
+#             "limit":5,
+#             "rating":"g"
+#         }
+
+#     result = requests.get(url, params=param).json()
+#     return result['data'][3]['images']['original']['url']
+
+# a = fr_api.get_airports()
+# airport_data = {}
+# for i,x in enumerate(a[1999:3850]): 
+#     iata = x.iata
+#     city = fr_api.get_airport(iata).city
+#     print(i,city)
+#     airport_data[x.iata] = city
+    
+# with open('cities2.json','w') as f:
+#     json.dump(airport_data,f)
 
 
-        
-# for x in a: 
-#     print(x)
-
-# print()
+# a = fr_api.get_airport('SVO',details=True)
+# b = fr_api.get_flights(registration='RA-73761')[0]
+print(fr_api.get_airlines()[0])
+for x in fr_api.get_airlines(): 
+    if x['Code'] == 'A4': 
+        print(x['Name'])
